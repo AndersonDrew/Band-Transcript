@@ -1,0 +1,118 @@
+#SI 1
+
+library("Rsubread")
+library("edgeR")
+
+#using gtf output from cufflinks extract names and transcripts to find total length of coding sequence obtained from sequencing. 
+#Choose the isoform with the longest read as the the length for calculation of transcripts per million. 
+#These data were used solely to rank transcripts by expression level (EdgeR analysis used the standard CPM calculated by the package)
+
+gtf<-read.delim("~merged.gtf",header=FALSE)
+name<-vector(mode="character")
+for (i in 1:length(gtf[,1]))
+	{
+	 rowi<-gtf$V9[i]
+	 namei<-substr(rowi,regexpr("gene_id ",rowi)[1]+8,regexpr("; transcript_id",rowi)[1]-1)
+	 name<-append(name,namei)
+	}
+name<-as.factor(name)
+gtf<-cbind(name,gtf)
+rm(name)
+trans<-vector(mode="character")
+for (i in 1:length(gtf[,1]))
+	{
+	 rowi<-gtf$V9[i]
+	 transi<-substr(rowi,regexpr("transcript_id ",rowi)[1]+14,regexpr("; exon_number",rowi)[1]-1)
+	 trans<-append(trans,transi)
+	}
+trans<-as.factor(trans)
+gtf<-cbind(trans,gtf)
+rm(trans)
+sco_name<-vector(mode="character")
+for (i in 1:length(gtf[,1]))
+	{
+	 rowi<-gtf$V9[i]
+	 if(attr(regexpr("gene_name ",rowi),"match.length")==10)
+	 	{
+		 namei<-substr(rowi,regexpr("gene_name ",rowi)[1]+10,regexpr("; oId",rowi)[1]-1)
+		}else
+		{
+		 namei<-""
+		}
+	 sco_name<-append(sco_name,namei)
+	}
+sco_name<-as.factor(sco_name)
+gtf<-cbind(sco_name,gtf)
+rm(sco_name)
+length<-vector(mode="numeric")
+for (i in 1:length(gtf[,1]))
+	{
+	 lengthi<-gtf$V5[i]-gtf$V4[i]
+	 length<-append(length,lengthi)
+	}
+length<-as.numeric(length)
+gtf<-cbind(length,gtf)
+rm(length)
+gtf_iso<-data.frame(Annot_Name=factor(),Cuff_Name=factor(),Trans_Name=factor(),Scaffold=factor(),Start=numeric(),Stop=numeric(),Length_ORF=numeric(),Direction=factor(),Info=factor())
+for(i in 1:length(levels(gtf$name)))
+	{
+	 genei<-subset(gtf,gtf$name==levels(gtf$name)[i])
+	 transi<-levels(droplevels(genei$trans))
+	 for (k in 1:length(transi))	 
+	 	{
+		 transk<-subset(genei,genei$trans==transi[k])
+		 len_orf<-sum(transk$length)
+		 gtf_isok<-data.frame(transk$sco_name[1],transk$name[1],transk$trans[1],transk$V1[1],min(transk$V4),max(transk$V5),len_orf,transk$V7[1],transk$V9[1])
+		 colnames(gtf_isok)<-c("Annot_Name","Cuff_Name","Trans_Name","Scaffold","Start","Stop","Length_ORF","Direction","Info")
+		 gtf_iso<-rbind(gtf_iso,gtf_isok)
+		}
+	}
+gtf_len<-data.frame(Annot_Name=factor(),Cuff_Name=factor(),Trans_Name=factor(),Scaffold=factor(),Start=numeric(),Stop=numeric(),Length_ORF=numeric(),Direction=factor(),Info=factor())
+for(i in 1:length(levels(gtf_iso$Cuff_Name)))
+	{
+	 genei<-subset(gtf_iso,gtf_iso$Cuff_Name==levels(gtf_iso$Cuff_Name)[i])
+	 rowi<-data.frame(genei[1,c(1:2)],genei$Trans_Name[which(genei$Length_ORF %in% max(genei$Length_ORF))],genei[1,4],min(genei$Start),max(genei$Stop),max(genei$Length_ORF),genei[1,8:9])
+	 colnames(rowi)<-c("Annot_Name","Cuff_Name","Trans_Name","Scaffold","Start","Stop","Length_ORF","Direction","Info")
+	 gtf_len<-rbind(gtf_len,rowi)
+	}
+
+tpm<-data.frame(10^6*(data.count$counts/gtf_len$Length_ORF)/(sum(data.count$counts/gtf_len$Length_ORF)))
+gtf_len<-cbind(gtf_len,tpm)
+
+#import read data into R and analysis using EdgeR to generate DataTable 2
+
+data<-featureCounts(files=c("~cufflink/C1M.sam.bam.sorted.bam","~cufflink/C2M.sam.bam.sorted.bam","~cufflink/C3M.sam.bam.sorted.bam","~cufflink/C5M.sam.bam.sorted.bam","~cufflink/C6M.sam.bam.sorted.bam","~cufflink/E1M.sam.bam.sorted.bam","~cufflink/E3M.sam.bam.sorted.bam","~cufflink/E4M.sam.bam.sorted.bam","~cufflink/E5M.sam.bam.sorted.bam","~cufflink/E6M.sam.bam.sorted.bam","~cufflink/C1F.sam.bam.sorted.bam","~cufflink/C2F.sam.bam.sorted.bam","~cufflink/C3F.sam.bam.sorted.bam","~cufflink/C4F.sam.bam.sorted.bam","~cufflink/C5F.sam.bam.sorted.bam","~cufflink/E1F.sam.bam.sorted.bam","~cufflink/E2F.sam.bam.sorted.bam","~cufflink/E3F.sam.bam.sorted.bam","~cufflink/E4F.sam.bam.sorted.bam","~cufflink/E5F.sam.bam.sorted.bam"), annot.ext="~merged.gtf", isGTFAnnotationFile=TRUE, useMetaFeatures=TRUE, allowMultiOverlap=TRUE, countMultiMappingReads=TRUE, isPairedEnd=TRUE, nthreads=4)
+
+groups=c("CM","CM","CM","CM","CM","EM","EM","EM","EM","EM","CF","CF","CF","CF","CF","EF","EF","EF","EF","EF")
+data.count<-DGEList(counts=data$counts, group=groups)
+keep<-rowSums(cpm(data.count)>1)>=5
+data.filt<-data.count[keep,keep.lib.sizes=FALSE]
+data.norm<-calcNormFactors(data.filt)
+design <- model.matrix(~0+groups, data=data.norm$samples)
+data.disp<-estimateDisp(data.norm,design)
+cpm_table<-cpm(data.norm)
+filt_gtf<-gtf_len[which(gtf_len$Cuff_Name %in% rownames(cpm_table)),]
+colnames(cpm_table)<-c("C1M","C2M","C3M","C5M","C6M","E1M","E3M","E4M","E5M","E6M","C1F","C2F","C3F","C4F","C5F","E1F","E2F","E3F","E4F","E5F")
+filt_gtf<-cbind(filt_gtf,cpm_table)
+etEM<-exactTest(data.disp,pair=c("CM","EM"))
+etEF<-exactTest(data.disp,pair=c("CM","EF"))
+etCF<-exactTest(data.disp,pair=c("CM","CF"))
+etCFvEF<-exactTest(data.disp,pair=c("CF","EF"))
+ttEM<-topTags(etEM,n=17360)
+ttEF<-topTags(etEF,n=17360)
+ttCF<-topTags(etCF,n=17360)
+ttCFvEF<-topTags(etCFvEF,n=17360)
+ttEM<-ttEM$table[order(rownames(ttEM$table)),]
+ttEF<-ttEF$table[order(rownames(ttEF$table)),]
+ttCF<-ttCF$table[order(rownames(ttCF$table)),]
+ttCFvEF<-ttCFvEF$table[order(rownames(ttCFvEF$table)),]
+filt_gtf<-cbind(filt_gtf,ttEM,ttEF,ttCF,ttCFvEF)
+write.table(filt_gtf,"~EdgeR work/datatable.txt")
+
+#subset various tables and use above code to extract exon data for longest ORF.  Create new gtf file.
+#use gffread to take gtf file of significant genes and run on blast2go "allblast"
+#for better mapping kept only b2g results without known genes
+#reanalyze with annotated gtf using genes found with significant changes "reblast"
+#these output files were not used in the final analysis due to low hits
+
+

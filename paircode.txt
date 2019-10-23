@@ -1,0 +1,436 @@
+#SI 4
+
+#grab subsetted data for shared expression differences from DT #2
+#names reflect shared expression differences (e.g. cm = control male, and ef = estrogen female)
+
+cmall<-read.csv("~cmall.csv")
+cmcfonly<-read.csv("~cmcfonly.csv")
+cmemonly<-read.csv("~cmemonly.csv")
+cmcfefonly<-read.csv("~cmcfefonly.csv")
+cmemefonly<-read.csv("~cmemefonly.csv")
+
+#combine data that had expression differences between CM and EM
+estmale<-rbind(cmall,cmemonly,cmemefonly)
+
+#grab outputs from EREFinder (all 1526 LG and scaffolds are in these files)
+#EREFinder parameters noted in manuscript)
+#Use only linkage groups to determine mean and high threshold for ERE binding cutoff
+
+mylist<-list.files("~ERE100/")
+names<-vector(mode="character")
+for(i in 1:length(mylist))
+	{
+	val<-levels(read.table(paste0("~ERE100/",mylist[i]))$V1)[1]
+	val<-substr(val,2,nchar(val))
+	names<-append(names,val)
+	}
+lgs<-c("LG1","LG2","LG3","LG4","LG5","LG6","LG7","LG8","LG9","LG10","LG11","LG12","LG13","LG14","LG15","LG16","LG17","LG18","LG19","LG20","LG21","LG22")
+lglist<-mylist[which(names %in% lgs)]
+chr <- read.csv(paste0("~ERE100/",lglist[1]),skip=1)
+chr <-subset(chr,chr$N>=80 & chr$mean_Kd_inverse!=-1)
+for(i in 2:length(lglist))
+	{
+	 x <- read.csv(paste0("~ERE100/",lglist[i]),skip = 1)
+	 x <-subset(x,x$N>=80 & x$mean_Kd_inverse!=-1)
+	 chr<-rbind(chr,x)
+	}
+sd3100<-mean(chr$mean_Kd_inverse)+3*sd(chr$mean_Kd_inverse)
+sd5100<-mean(chr$mean_Kd_inverse)+5*sd(chr$mean_Kd_inverse)
+rm(chr)
+
+#find peaks of high estrogen binding across whole genome. Choose cutoff value of 0.0045 instead of a standard deviation measure to further reduce the number of hits
+
+x <- read.csv(paste0("~ERE100/",mylist[1]),skip = 1)
+x <-subset(x,x$N>=80 & x$mean_Kd_inverse!=-1)
+val<-levels(read.table(paste0("~ERE100/",mylist[1]))$V1)[1]
+val<-substr(val,2,nchar(val))
+
+#peaksnew is function that finds regions of high binding based on the sliding window size and interval. The function is at bottom of text file
+
+genome45<-peaksnew(x,0.0045,50,100)
+genome45$Chromosome<-val
+for(i in 2:length(mylist))
+	{
+	 x <- read.csv(paste0("~ERE100/",mylist[i]),skip = 1)
+	 x <-subset(x,x$N>=80 & x$mean_Kd_inverse!=-1)
+	 val<-levels(read.table(paste0("~ERE100/",mylist[i]))$V1)[1]
+	 val<-substr(val,2,nchar(val))
+	 print(val)
+	 print(mylist[i])
+	 if(length(subset(x,x$mean_Kd_inverse>=0.0045)[,1])>=1)
+	 {
+		xpeak<-peaksnew(x,0.0045,50,100)
+		xpeak$Chromosome<-val
+		genome45<-rbind(genome45,xpeak)
+	 }
+	}
+genome45$Chromosome<-as.factor(genome45$Chromosome)
+
+#pairPeak is a function that takes the peaknew output and pairs it with gff data (or custom tables imported above) to find peaks that fall within a preset range of the gene. Function is at bottom of text file
+
+empair45<-pairPeak(genome45,estmale,25000,-10000)
+
+#remove binding regions that are downstream of the gene.
+
+empair_up45<-subset(empair45,empair45$Proxy!="Down")
+
+#import gff of species and generate a table for use in pairpeak.
+
+sco<-read.delim("C://Users/aanderson/Desktop/ubuntushare/scovelli_annot.gtf",header=FALSE)
+sco<-subset(sco,sco$V3=="CDS")
+name<-vector(mode="character")
+for(i in 1:length(sco$V9))
+ {
+     rowi<-sco$V9[i]
+     namei<-substr(rowi,regexpr("gene_id ",rowi)[1]+8,regexpr("; gene_name",rowi)[1]-1)
+     name<-append(name,namei)
+ }
+sco<-data.frame("S_scovelli",name,sco[,c(1,4,5,7,9)])
+colnames(sco)<-c("Species","Name","Chromosome","Start","Stop","GeneDirection","Info")
+scogene<-data.frame(Species=factor(),Name=factor(),Chromosome=factor(),Start=numeric(),Stop=numeric(),GeneDirection=factor(),Info=factor())
+for(i in 1:length(levels(sco[,2])))
+ {
+ scoi<-subset(sco,sco[,2]==levels(sco[,2])[i])
+ scoi<-data.frame(scoi[1,1:4],tail(scoi[,5],n=1),scoi[1,6:7])
+ scogene<-rbind(scogene,scoi)
+ }
+colnames(scogene)<-c("Species","Name","Chromosome","Start","Stop","GeneDirection","Info")
+
+#generate a randomly chosen dataset for pairpeak function 1000 times to find normal distribution of hits
+
+numpeakrand45<-c()
+randprox45<-c()
+for(i in 1:1000)
+ {
+ print(i)
+ randi<-scogene[sample(nrow(scogene),17),]
+ matchrandi<-pairPeak(genome45,randi,25000,-10000)
+ matchrandi<-subset(matchrandi,matchrandi$Proxy!="Down")
+ proxi<-length(levels(droplevels(matchrandi$Gene)))
+ randprox45<-c(randprox45,proxi)
+ numpeaki<-length(matchrandi$Gene)
+ numpeakrand45<-c(numpeakrand45,numpeaki)
+ }
+ 
+#repeat process for the set of genes that are sexually dimorphic but without estrogen control
+
+mef<-pairPeak(genome45,cmcfefonly,25000,-10000)
+mef<-subset(mef,mef$Proxy!="Down")
+
+
+numpeakrandcfef<-c()
+randproxcfef<-c()
+for(i in 1:1000)
+ {
+ print(i)
+ randi<-scogene[sample(nrow(scogene),length(cmcfefonly$Name)),]
+ matchrandi<-pairPeak(genome45,randi,25000,-10000)
+ matchrandi<-subset(matchrandi,matchrandi$Proxy!="Down")
+ proxi<-length(levels(droplevels(matchrandi$Gene)))
+ randproxcfef<-c(randproxcfef,proxi)
+ numpeaki<-length(matchrandi$Gene)
+ numpeakrandcfef<-c(numpeakrandcfef,numpeaki)
+ }
+ 
+#peak finding function
+
+peaksnew<-function(output,peakcut,slidesize,winsize)
+	{
+	 cut<-subset(output,output$mean_Kd_inverse>=peakcut)
+	 window<-vector(mode="character")
+	 if(length(cut$N)>=3)
+	 {
+		for(i in 2:(length(cut$N)-1))
+			{
+			if(cut$genome_position[i+1]-cut$genome_position[i]==slidesize)
+				{
+				if(cut$genome_position[i]-cut$genome_position[i-1]==slidesize)
+					{
+					stat<-"middle"
+					}else
+					{
+					stat<-"start"
+					}
+				}else
+				{
+				if(cut$genome_position[i]-cut$genome_position[i-1]==slidesize)
+					{
+					stat<-"end"
+					}else
+					{
+					stat<-"both"
+					}
+				}
+			window<-append(window,stat)
+			}
+		if(window[length(window)]=="start" | window[length(window)]=="middle")
+			{
+			stat<-"end"
+			}else
+			{
+			stat<-"both"
+			}
+		window<-append(window,stat)
+		if(window[1]=="middle" | window[1]=="end")
+			{
+			stat<-"start"
+			}else
+			{
+			stat<-"both"
+			}
+		window<-append(stat,window)
+	}else
+	{
+	if(length(cut$N)==1)
+		{
+		window<-c("both")
+		}else
+		{
+		if(cut$genome_position[2]-cut$genome_position[1]==slidesize)
+			{
+			window<-c("start","end")
+			}else
+			{
+			window<-c("both","both")
+			}
+		}
+	}
+	 cut<-cbind(cut,window)
+	 st_end<-subset(cut,cut$window!="both")
+	 start<-which(st_end$window=="start")
+	 end<-which(st_end$window=="end")
+	 peak<-data.frame(Start=numeric(),End=numeric(),Kd_Zenith=numeric(),Kd_Max=numeric(),ERE=numeric(),Mis_Max1=numeric(),Mis2_Max=numeric(),Mis3_Max=numeric(),Half=numeric())
+	 if(length(start)>=1)
+		{
+		for(i in 1:length(start))
+		{
+		 subi<-st_end[start[i]:end[i],]
+		 newi<-data.frame(subi$genome_position[1],subi$genome_position[length(subi$genome_position)]+winsize,subi$genome_position[which(subi$mean_Kd_inverse==max(subi$mean_Kd_inverse))],max(subi$mean_Kd_inverse),max(subi$N_over_1.5),max(subi$N_0.15_to_1.5),max(subi$N_0.09_to_0.15),max(subi$N_0.04_to_0.09),max(subi$Total_over_0.04))
+		 colnames(newi)<-c("Start","End","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half")
+		 peak<-rbind(peak,newi)
+		}
+		}
+	 bot<-subset(cut,cut$window=="both")
+	 if(length(bot[,1])>=1)
+		{
+		for(i in 1:length(bot$N))
+		{
+		 newi<-data.frame(bot$genome_position[i],bot$genome_position[i]+winsize,bot$genome_position[i],bot$mean_Kd_inverse[i],bot$N_over_1.5[i],bot$N_0.15_to_1.5[i],bot$N_0.09_to_0.15[i],bot$N_0.04_to_0.09[i],bot$Total_over_0.04[i])
+		 colnames(newi)<-c("Start","End","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half")
+		 peak<-rbind(peak,newi)
+		}
+		}
+	peak<-peak[order(peak$Start),]
+	 if(length(peak$Start)>=3)
+	 {
+	 window<-vector(mode="character")
+	 for(i in 2:(length(peak$Start)-1))
+		{
+		 if(peak$Start[i+1]-peak$Start[i]<=winsize)
+			{
+			 if(peak$Start[i]-peak$Start[i-1]<=winsize)
+				{
+				 stat<-"middle"
+				}else
+				{
+				 stat<-"start"
+				}
+			}else
+			{
+			 if(peak$Start[i]-peak$Start[i-1]<=winsize)
+				{
+				 stat<-"end"
+				}else
+				{
+				 stat<-"both"
+				}
+			}
+		 window<-append(window,stat)
+		}
+	 if(window[length(window)]=="start" | window[length(window)]=="middle")
+		{
+		 stat<-"end"
+		}else
+		{
+		 stat<-"both"
+		}
+	 window<-append(window,stat)
+	 if(window[1]=="middle" | window[1]=="end")
+		{
+		 stat<-"start"
+		}else
+		{
+		 stat<-"both"
+		}
+	 window<-append(stat,window)
+	 peak<-cbind(peak,window)
+	 st_end<-subset(peak,peak$window!="both")
+	 start<-which(st_end$window=="start")
+	 end<-which(st_end$window=="end")
+	 peaknew<-data.frame(Start=numeric(),End=numeric(),Kd_Zenith=numeric(),Kd_Max=numeric(),ERE=numeric(),Mis_Max1=numeric(),Mis2_Max=numeric(),Mis3_Max=numeric(),Half=numeric())
+	 if(length(start)>=1)
+		{
+		for(i in 1:length(start))
+		{
+		 subi<-st_end[start[i]:end[i],]
+		 newi<-data.frame(subi$Start[1],subi$End[length(subi$Start)]+winsize,subi$Start[which(subi$Kd_Max==max(subi$Kd_Max))],max(subi$Kd_Max),max(subi$ERE),max(subi$Mis1_Max),max(subi$Mis2_Max),max(subi$Mis3_Max),max(subi$Half))
+		 colnames(newi)<-c("Start","End","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half")
+		 peaknew<-rbind(peaknew,newi)
+		}
+		}
+	 bot<-subset(peak,peak$window=="both")
+	 if(length(bot[,1])>=1)
+		{
+		for(i in 1:length(bot$Start))
+		{
+		 newi<-data.frame(bot$Start[i],bot$End[i]+winsize,bot$Start[i],bot$Kd_Max[i],bot$ERE[i],bot$Mis1_Max[i],bot$Mis2_Max[i],bot$Mis3_Max[i],bot$Half[i])
+		 colnames(newi)<-c("Start","End","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half")
+		 peaknew<-rbind(peaknew,newi)
+		}
+		}
+	}else
+	{
+	peaknew<-peak
+	}
+	peaknew<-peaknew[order(peaknew$Start),]
+	return(peaknew)
+} 
+
+#pair peak and gff function
+
+pairPeak<-function(peak,gff,updist,downdist)
+	{
+	 output<-data.frame(Species=factor(),Gene=factor(),Chromosome=factor(),peakStart=integer(),peakStop=integer(),GeneDirection=factor(),GeneStart=integer(),GeneStop=integer(),Distance=integer(),Proxy=factor(),Kd_Zenith=integer(),Kd_Max=numeric(),ERE=integer(),Mis1_Max=integer(),Mis2_Max=integer(),Mis3_Max=integer(),Half=integer(),Info=factor())
+	 for(i in 1:length(levels(peak$Chromosome)))
+		{
+		 gffi<-subset(gff,levels(peak$Chromosome)[i]==gff$Chromosome)
+		 peaki<-subset(peak,levels(peak$Chromosome)[i]==peak$Chromosome)
+		 gffif<-subset(gffi,GeneDirection=="+")
+		 gffir<-subset(gffi,GeneDirection=="-")
+		 if(length(peaki$Chromosome)>=1)
+			{
+			 for(j in 1:length(peaki$Chromosome))
+				{
+				 startj<-gffif$Start-peaki$End[j]
+				 frontj<-subset(startj,startj<updist & startj>0)
+				 find_frontj<-which(startj %in% frontj)				 
+				 if(length(frontj)!=0)
+					{					 
+					 pointj<-data.frame(gffif$Species[find_frontj],gffif$Name[find_frontj],peaki$Chromosome[j],peaki$Start[j],peaki$End[j],gffif$GeneDirection[find_frontj],gffif$Start[find_frontj],gffif$Stop[find_frontj],frontj,"Up",peaki$Kd_Zenith[j],peaki$Kd_Max[j],peaki$ERE[j],peaki$Mis1_Max[j],peaki$Mis2_Max[j],peaki$Mis3_Max[j],peaki$Half[j],gffif$Info[find_frontj])
+					 colnames(pointj)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointj)
+					}
+				}
+			for(k in 1:length(peaki$Chromosome))
+				{
+				 startk<-gffir$Start-peaki$End[k]
+				 frontk<-subset(startk,startk<updist & startk>0)
+				 find_frontk<-which(startk %in% frontk) 
+				 if(length(frontk)!=0)
+					{ 
+					 pointk<-data.frame(gffir$Species[find_frontk],gffir$Name[find_frontk],peaki$Chromosome[k],peaki$Start[k],peaki$End[k],gffir$GeneDirection[find_frontk],gffir$Stop[find_frontk],gffir$Start[find_frontk],frontk,"Down",peaki$Kd_Zenith[k],peaki$Kd_Max[k],peaki$ERE[k],peaki$Mis1_Max[k],peaki$Mis2_Max[k],peaki$Mis3_Max[k],peaki$Half[k],gffir$Info[find_frontk])
+					 colnames(pointk)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointk)
+					}
+				}
+			 for(l in 1:length(peaki$Chromosome))
+				{
+				 stopl<-peaki$Start[l]-gffif$Stop
+				 backl<-subset(stopl,stopl<updist & stopl>0)
+				 find_backl<-which(stopl %in% backl)
+				 if(length(backl)!=0)
+					{
+					 pointl<-data.frame(gffif$Species[find_backl],gffif$Name[find_backl],peaki$Chromosome[l],peaki$Start[l],peaki$End[l],gffif$GeneDirection[find_backl],gffif$Start[find_backl],gffif$Stop[find_backl],backl,"Down",peaki$Kd_Zenith[l],peaki$Kd_Max[l],peaki$ERE[l],peaki$Mis1_Max[l],peaki$Mis2_Max[l],peaki$Mis3_Max[l],peaki$Half[l],gffif$Info[find_backl])
+			 	 	 colnames(pointl)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointl)
+					}
+				}
+			 for(m in 1:length(peaki$Chromosome))
+				{
+				 stopm<-peaki$Start[m]-gffir$Stop
+				 backm<-subset(stopm,stopm<updist & stopm>0)
+				 find_backm<-which(stopm %in% backm)
+				 if(length(backm)!=0)
+					{
+					 pointm<-data.frame(gffir$Species[find_backm],gffir$Name[find_backm],peaki$Chromosome[m],peaki$Start[m],peaki$End[m],gffir$GeneDirection[find_backm],gffir$Stop[find_backm],gffir$Start[find_backm],backm,"Up",peaki$Kd_Zenith[m],peaki$Kd_Max[m],peaki$ERE[m],peaki$Mis1_Max[m],peaki$Mis2_Max[m],peaki$Mis3_Max[m],peaki$Half[m],gffir$Info[find_backm])
+			 	 	 colnames(pointm)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointm)
+					}
+				}
+			for(p in 1:length(peaki$Chromosome))
+				{
+				 hitp<-data.frame(gffif$Start-peaki$Start[p],peaki$End[p]-gffif$Stop)
+				 midp<-subset(hitp,hitp[,1]<0 & hitp[,2]<0 &hitp[,1]>downdist)[,1]
+				 find_midp<-which(hitp[,1] %in% midp)
+				 if(length(midp)!=0)
+					{
+					 pointp<-data.frame(gffif$Species[find_midp],gffif$Name[find_midp],peaki$Chromosome[p],peaki$Start[p],peaki$End[p],gffif$GeneDirection[find_midp],gffif$Start[find_midp],gffif$Stop[find_midp],hitp[find_midp,1],"Inter",peaki$Kd_Zenith[p],peaki$Kd_Max[p],peaki$ERE[p],peaki$Mis1_Max[p],peaki$Mis2_Max[p],peaki$Mis3_Max[p],peaki$Half[p],gffif$Info[find_midp])
+				 	 colnames(pointp)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointp)
+					}
+				}
+			for(q in 1:length(peaki$Chromosome))
+				{
+				 hitq<-data.frame(gffir$Start-peaki$Start[q],peaki$End[q]-gffir$Stop)
+				 midq<-subset(hitq,hitq[,1]<0 & hitq[,2]<0 &hitq[,2]>downdist)[,1]
+				 find_midq<-which(hitq[,1] %in% midq)
+				 if(length(midq)!=0)
+					{
+					 pointq<-data.frame(gffir$Species[find_midq],gffir$Name[find_midq],peaki$Chromosome[q],peaki$Start[q],peaki$End[q],gffir$GeneDirection[find_midq],gffir$Stop[find_midq],gffir$Start[find_midq],hitq[find_midq,2],"Inter",peaki$Kd_Zenith[q],peaki$Kd_Max[q],peaki$ERE[q],peaki$Mis1_Max[q],peaki$Mis2_Max[q],peaki$Mis3_Max[q],peaki$Half[q],gffir$Info[find_midq])
+				 	 colnames(pointq)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointq)
+					}
+				}
+			for(r in 1:length(peaki$Chromosome))
+				{
+				 hitr<-data.frame(gffif$Start-peaki$Start[r],gffif$Start-peaki$End[r])
+				 midr<-subset(hitr,hitr[,1]<0 & hitr[,2]>0)[,1]
+				 find_midr<-which(hitr[,1] %in% midr)
+				 if(length(midr)!=0)
+					{
+					 pointr<-data.frame(gffif$Species[find_midr],gffif$Name[find_midr],peaki$Chromosome[r],peaki$Start[r],peaki$End[r],gffif$GeneDirection[find_midr],gffif$Start[find_midr],gffif$Stop[find_midr],hitr[find_midr,1],"BridgeUp",peaki$Kd_Zenith[r],peaki$Kd_Max[r],peaki$ERE[r],peaki$Mis1_Max[r],peaki$Mis2_Max[r],peaki$Mis3_Max[r],peaki$Half[r],gffif$Info[find_midr])
+				 	 colnames(pointr)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointr)
+					}
+				}
+			for(s in 1:length(peaki$Chromosome))
+				{
+				 hits<-data.frame(gffir$Stop-peaki$Start[s],gffir$Stop-peaki$End[s])
+				 mids<-subset(hits,hits[,1]<0 & hits[,2]>0)[,1]
+				 find_mids<-which(hits[,1] %in% mids)
+				 if(length(mids)!=0)
+					{
+					 points<-data.frame(gffir$Species[find_mids],gffir$Name[find_mids],peaki$Chromosome[s],peaki$Start[s],peaki$End[s],gffir$GeneDirection[find_mids],gffir$Stop[find_mids],gffir$Start[find_mids],hits[find_mids,2],"BridgeUp",peaki$Kd_Zenith[s],peaki$Kd_Max[s],peaki$ERE[s],peaki$Mis1_Max[s],peaki$Mis2_Max[s],peaki$Mis3_Max[s],peaki$Half[s],gffir$Info[find_mids])
+				 	 colnames(points)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,points)
+					}
+				}
+			for(t in 1:length(peaki$Chromosome))
+				{
+				 hitt<-data.frame(gffif$Stop-peaki$Start[t],gffif$Stop-peaki$End[t])
+				 midt<-subset(hitt,hitt[,1]<0 & hitt[,2]>0)[,1]
+				 find_midt<-which(hitt[,1] %in% midt)
+				 if(length(midt)!=0)
+					{
+					 pointt<-data.frame(gffif$Species[find_midt],gffif$Name[find_midt],peaki$Chromosome[t],peaki$Start[t],peaki$End[t],gffif$GeneDirection[find_midt],gffif$Start[find_midt],gffif$Stop[find_midt],hitt[find_midt,2],"BridgeDown",peaki$Kd_Zenith[t],peaki$Kd_Max[t],peaki$ERE[t],peaki$Mis1_Max[t],peaki$Mis2_Max[t],peaki$Mis3_Max[t],peaki$Half[t],gffif$Info[find_midt])
+				 	 colnames(pointt)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointt)
+					}
+				}
+			for(u in 1:length(peaki$Chromosome))
+				{
+				 hitu<-data.frame(gffir$Start-peaki$Start[u],gffir$Start-peaki$End[u])
+				 midu<-subset(hitu,hitu[,1]<0 & hitu[,2]>0)[,1]
+				 find_midu<-which(hitu[,1] %in% midu)
+				 if(length(midu)!=0)
+					{
+					 pointu<-data.frame(gffir$Species[find_midu],gffir$Name[find_midu],peaki$Chromosome[u],peaki$Start[u],peaki$End[u],gffir$GeneDirection[find_midu],gffir$Stop[find_midu],gffir$Start[find_midu],hitu[find_midu,1],"BridgeDown",peaki$Kd_Zenith[u],peaki$Kd_Max[u],peaki$ERE[u],peaki$Mis1_Max[u],peaki$Mis2_Max[u],peaki$Mis3_Max[u],peaki$Half[u],gffir$Info[find_midu])
+				 	 colnames(pointu)<-c("Species","Gene","Chromosome","peakStart","peakStop","GeneDirection","GeneStart","GeneStop","Distance","Proxy","Kd_Zenith","Kd_Max","ERE","Mis1_Max","Mis2_Max","Mis3_Max","Half","Info")
+					 output<-rbind(output,pointu)
+					}
+				}
+			}
+		}
+		output<-output[order(output[,3],output[,7],output[,4]),]
+	 return(output)
+	}

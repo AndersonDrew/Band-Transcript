@@ -1,0 +1,101 @@
+#import paired-end bam files after they have been aligned (hisat2) and import gtf file generated from merging reads and genome (cuffmerge).
+
+
+data<-featureCounts(files=c("/Users/andersond/Desktop/bam/C1M.sam.bam","/Users/andersond/Desktop/bam/C2M.sam.bam","/Users/andersond/Desktop/bam/C3M.sam.bam","/Users/andersond/Desktop/bam/C5M.sam.bam","/Users/andersond/Desktop/bam/C6M.sam.bam","/Users/andersond/Desktop/bam/E1M.sam.bam","/Users/andersond/Desktop/bam/E3M.sam.bam","/Users/andersond/Desktop/bam/E4M.sam.bam","/Users/andersond/Desktop/bam/E5M.sam.bam","/Users/andersond/Desktop/bam/E6M.sam.bam","/Users/andersond/Desktop/bam/C1F.sam.bam","/Users/andersond/Desktop/bam/C2F.sam.bam","/Users/andersond/Desktop/bam/C3F.sam.bam","/Users/andersond/Desktop/bam/C4F.sam.bam","/Users/andersond/Desktop/bam/C5F.sam.bam","/Users/andersond/Desktop/bam/E1F.sam.bam","/Users/andersond/Desktop/bam/E2F.sam.bam","/Users/andersond/Desktop/bam/E3F.sam.bam","/Users/andersond/Desktop/bam/E4F.sam.bam","/Users/andersond/Desktop/bam/E5F.sam.bam"), annot.ext="/Users/andersond/Desktop/bam/merged.gtf", isGTFAnnotationFile=TRUE, useMetaFeatures=TRUE, allowMultiOverlap=TRUE, countMultiMappingReads=TRUE, isPairedEnd=TRUE, nthreads=4)
+
+
+#set groups
+groups=c("CM","CM","CM","CM","CM","EM","EM","EM","EM","EM","CF","CF","CF","CF","CF","EF","EF","EF","EF","EF")
+
+
+#count data by groups
+data.count<-DGEList(counts=data$counts, group=groups)
+
+
+#at least one group must have at least one read for every sample
+keep<-rowSums(cpm(data.count)>1)>=5
+data.filt<-data.count[keep,keep.lib.sizes=FALSE]
+
+
+#normalize data
+data.norm<-calcNormFactors(data.filt)
+
+
+#original grouping, treat each group as independent
+design <- model.matrix(~0+group, data=data.norm$samples)
+y<-estimateDisp(data.norm,design)
+colnames(design)
+##[1] "groupCF" "groupCM" "groupEF" "groupEM"
+
+
+#here is where I did pairwise comparisons
+
+
+#attempting with glm
+fit<-glmQLFit(y,design)
+
+
+#compare EM vs CM
+qlfcmvem<-glmQLFTest(fit,contrast=c(0,-1,0,1))
+
+
+#report top 30 DE genes
+topTags(qlfcmvem,n=30)#Coefficient:  -1*groupCM 1*groupEM                 logFC     logCPM        F       PValue        FDR#XLOC_001270  2.723237  1.0156503 35.90512 8.061996e-06 0.09983165#XLOC_020143  8.928699  9.6072255 34.02522 1.139241e-05 0.09983165#XLOC_016640 -2.127125  7.2241615 31.47795 1.858081e-05 0.10397763#XLOC_014459  6.793124  4.3138508 30.25157 2.373106e-05 0.10397763#XLOC_011710  2.175849  3.7254660 28.38446 3.486917e-05 0.10844442#XLOC_020613  8.870118  9.4767582 27.50744 4.200588e-05 0.10844442#XLOC_025229  5.687304  9.0665198 27.36469 4.331342e-05 0.10844442#XLOC_020916  2.202162  0.3658047 26.40424 5.337150e-05 0.11411547#XLOC_016492  1.164509  4.7650602 25.98103 5.860089e-05 0.11411547#XLOC_021505  4.478976  4.9933870 24.21705 8.739747e-05 0.15317281#XLOC_000945  3.628826 -0.6449448 23.22554 1.102433e-04 0.17564761#XLOC_020801  2.033226  3.2136565 22.74196 1.237212e-04 0.18069487#XLOC_015532  2.502482  1.9607752 21.41196 1.711665e-04 0.22034602#XLOC_018560  2.722735  5.0033650 21.29961 1.760153e-04 0.22034602#XLOC_023370  3.454558  7.8013206 20.47504 2.166179e-04 0.25309639#XLOC_021617 -1.567105  2.7778148 20.00916 2.440672e-04 0.26734514#XLOC_016641 -1.775643  6.9461962 19.45416 2.819035e-04 0.29062589#XLOC_018346  5.213792  4.8357501 18.87963 3.280287e-04 0.30319050#XLOC_023465  1.875938  2.5007054 18.87206 3.286899e-04 0.30319050#XLOC_015218  0.811971  2.6826018 18.48200 3.648263e-04 0.31969732#XLOC_005776  2.360608 -0.2666812 18.26366 3.869566e-04 0.32294295#XLOC_012770  1.068673  3.7276409 17.82517 4.360294e-04 0.33902070#XLOC_016511  1.083816  1.8526325 17.53529 4.722378e-04 0.33902070#XLOC_018085 -1.388677  3.3931493 17.51214 4.752697e-04 0.33902070#XLOC_024723 -1.171590  4.6446931 17.35351 4.966333e-04 0.33902070#XLOC_011933  3.718528  4.1636110 17.30812 5.029407e-04 0.33902070#XLOC_023606  5.792901 -0.6215224 16.37589 6.542438e-04 0.41390898#XLOC_013950  1.205339  1.6229407 16.33857 6.612719e-04 0.41390898#XLOC_003838  2.411196  6.6934893 16.19411 6.892728e-04 0.41655842#XLOC_003306  1.240594  1.9070519 16.04640 7.192672e-04 0.42019588
+
+
+#none are significant using FDR
+
+
+#read in data table of all pairwise comparisons
+tab<-read.table("/Volumes/Seagate\ Expansion\ Drive/Band\ Trascriptome/Code/datatable.txt")
+
+
+#are the top genes from glm on my list of DE genes?
+tab[which(tab$Cuff_Name %in% row.names(topTags(qlfcmvem,n=30))),c(2,52)]        Cuff_Name    CMvEM_FDR#4642  XLOC_000945 1.306376e-03#6443  XLOC_001270 9.965450e-05#14274 XLOC_003306 1.343084e-01#16364 XLOC_003838 3.426860e-02#23952 XLOC_005776 3.344089e-02#47589 XLOC_011710 5.401421e-04#48434 XLOC_011933 1.282999e-02#51859 XLOC_012770 6.196519e-02#56165 XLOC_013950 1.307551e-01#57994 XLOC_014459 1.891771e-05#61209 XLOC_015218 1.343084e-01#62283 XLOC_015532 4.565561e-03#65808 XLOC_016492 4.565561e-03#65843 XLOC_016511 9.013703e-02#66432 XLOC_016640 1.870612e-04#66433 XLOC_016641 1.534227e-02#72187 XLOC_018085 3.911056e-02#73182 XLOC_018346 4.565561e-03#74014 XLOC_018560 4.565561e-03#79953 XLOC_020143 5.624554e-06#82166 XLOC_020613 1.527546e-04#83353 XLOC_020801 4.565561e-03#83861 XLOC_020916 4.565561e-03#86256 XLOC_021505 6.546771e-04#86675 XLOC_021617 1.850096e-02#93776 XLOC_023370 4.565561e-03#94316 XLOC_023465 2.145246e-02#94818 XLOC_023606 2.759740e-02#98086 XLOC_024723 5.681380e-02#99905 XLOC_025229 1.527546e-04
+
+#26 of the 28 DE genes from pairwise comparison are on this list of 30 genes. Results nearly the same
+
+
+#interaction model
+#set levels
+expose=c("Control","Control","Control","Control","Control","Estrogen","Estrogen","Estrogen","Estrogen","Estrogen","Control","Control","Control","Control","Control","Estrogen","Estrogen","Estrogen","Estrogen","Estrogen")
+sex=c("Male","Male","Male","Male","Male","Male","Male","Male","Male","Male","Female","Female","Female","Female","Female","Female","Female","Female","Female","Female")
+
+
+#new groupings
+targets<-data.frame(sex,expose,groups)
+row.names(targets)<-row.names(y$samples)
+
+
+#relevel to control males
+targets$expose<-relevel(targets$expose, ref="Control")
+targets$sex<-relevel(targets$sex, ref="Male")
+
+
+#generate the different groups
+design2<-model.matrix(~sex*expose, data=targets)
+z<-estimateDisp(data.norm,design2)
+
+
+colnames(design2)
+##[1] "(Intercept)"              "sexFemale"                "exposeEstrogen"           "sexFemale:exposeEstrogen"
+
+
+#as before
+fit2<-glmQLFit(z,design2)
+
+
+#test interaction term
+qlfint<-glmQLFTest(fit2,coef=4)
+
+
+#top 20 genes from test
+topTags(qlfint,n=20)#Coefficient:  sexFemale:exposeEstrogen #                logFC    logCPM        F       PValue        FDR#XLOC_026425 -7.323718 0.5846021 38.10081 5.464802e-06 0.09577612#XLOC_016492 -1.700219 4.7650602 28.04493 3.745967e-05 0.22509800#XLOC_001270 -3.194398 1.0156503 27.91202 3.853098e-05 0.22509800#XLOC_020143 -8.989275 9.6072255 25.69379 6.247171e-05 0.22840500#XLOC_023112 -1.830726 3.1476563 25.50551 6.516176e-05 0.22840500#XLOC_025041  3.219733 5.3532610 22.97283 1.170723e-04 0.31280496#XLOC_020613 -9.326912 9.4767582 22.19506 1.411996e-04 0.31280496#XLOC_016640  2.456785 7.2241615 22.14921 1.427844e-04 0.31280496#XLOC_011710 -2.511079 3.7254660 20.18780 2.331114e-04 0.44701874#XLOC_012280 -2.595675 0.2795221 19.83861 2.550603e-04 0.44701874#XLOC_021505 -5.065287 4.9933870 18.50127 3.629408e-04 0.55062717#XLOC_012214 -2.704866 0.7828960 18.36001 3.770128e-04 0.55062717#XLOC_025229 -5.712169 9.0665198 17.97739 4.182543e-04 0.56387109#XLOC_014459 -6.092902 4.3138508 17.01112 5.464628e-04 0.68409338#XLOC_016641  2.286759 6.9461962 16.69091 5.981109e-04 0.69883277#XLOC_020916 -2.254211 0.3658047 15.42838 8.614281e-04 0.94358675#XLOC_023232 -1.326400 3.1055551 15.07136 9.575672e-04 0.96949284#XLOC_015469 -1.595438 1.0577155 14.88836 1.011410e-03 0.96949284#XLOC_005899  5.316217 2.4086252 14.74316 1.056517e-03 0.96949284#XLOC_016259  3.288815 5.6303652 14.58770 1.107301e-03 0.96949284
+
+# none are significant
+
+# compare to pairwise list
+
+#tab[which(tab$Cuff_Name %in% row.names(topTags(qlfint,n=20))),c(2,52,56)]         Cuff_Name    CMvEM_FDR    CMvCF_FDR#6443   XLOC_001270 9.965450e-05 7.413522e-07#24450  XLOC_005899 9.185294e-01 1.809158e-01#47589  XLOC_011710 5.401421e-04 1.279428e-04#49489  XLOC_012214 6.891583e-01 9.720009e-01#49719  XLOC_012280 2.994264e-01 7.201677e-01#57994  XLOC_014459 1.891771e-05 2.068508e-07#62119  XLOC_015469 4.522261e-01 3.928364e-01#64810  XLOC_016259 7.248460e-01 6.574281e-02#65808  XLOC_016492 4.565561e-03 9.584374e-01#66432  XLOC_016640 1.870612e-04 8.457257e-02#66433  XLOC_016641 1.534227e-02 5.745041e-01#79953  XLOC_020143 5.624554e-06 7.161655e-07#82166  XLOC_020613 1.527546e-04 6.894498e-05#83861  XLOC_020916 4.565561e-03 8.866799e-05#86256  XLOC_021505 6.546771e-04 5.274925e-03#92550  XLOC_023112 6.206236e-01 8.570532e-01#93097  XLOC_023232 5.429651e-01 8.065223e-04#99119  XLOC_025041 6.674701e-01 2.725815e-02#99905  XLOC_025229 1.527546e-04 2.028750e-04#104045 XLOC_026425 1.000000e+00 8.799280e-07
+
+#8 of 17 genes DE between CM and EM and CM and CF are on this list. While none are significant, results are generally recapitulated.
